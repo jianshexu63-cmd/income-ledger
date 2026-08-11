@@ -140,6 +140,7 @@ function migrateState(data) {
       id: classItem.id || uid(),
       name: classItem.name || "",
       grade: classItem.grade || GRADES[0],
+      courseType: normalizeCourseType(classItem.courseType) || inferCourseTypeFromCount(migratedMembers.filter((member) => member.status !== "inactive").length),
       institutionTag: normalizeTag(classItem.institutionTag || classItem.tag || classItem.sourceTag),
       students: migratedMembers.map((member) => ({
         id: member.id || uid(),
@@ -792,10 +793,11 @@ function renderLessonPickers() {
   const hasTemplate = !!activeTemplate;
   const simpleType = $("simpleCourseType")?.value || "";
   const isSimpleClass = !hasTemplate && simpleType === "classCourse";
-  const showAttendance = hasTemplate || lessonAttendance.length || isSimpleClass;
-  $("selectedLessonSummary").classList.toggle("hidden", !hasTemplate);
+  const selectedSimpleClass = !hasTemplate ? getClass($("simpleClass").value) : null;
+  const showAttendance = hasTemplate || lessonAttendance.length || isSimpleClass || selectedSimpleClass;
+  $("selectedLessonSummary").classList.toggle("hidden", !hasTemplate && !selectedSimpleClass);
   $("attendancePanel").classList.toggle("hidden", !showAttendance);
-  if (!hasTemplate) $("selectedLessonSummary").innerHTML = "";
+  if (!hasTemplate && !selectedSimpleClass) $("selectedLessonSummary").innerHTML = "";
   const classItem = hasTemplate && activeTemplate.courseType === "classCourse" ? getClass(activeTemplate.classId) : null;
   const student = hasTemplate && activeTemplate.courseType === "oneToOne" ? getStudent((activeTemplate.studentIds || [])[0]) : null;
   const className = classItem?.name || activeTemplate?.className || "";
@@ -805,12 +807,18 @@ function renderLessonPickers() {
       <strong>${h(activeTemplate.name)}</strong>
       <span>${h(COURSE_TYPES[activeTemplate.courseType])}｜${h(activeTemplate.grade)}${className ? `｜${h(className)}` : ""}${tag ? `｜${h(tag)}` : ""}</span>
     `;
+  } else if (selectedSimpleClass) {
+    $("selectedLessonSummary").innerHTML = `
+      <strong>${h(selectedSimpleClass.name)}</strong>
+      <span>${h(COURSE_TYPES[classCourseType(selectedSimpleClass)])}｜${h(selectedSimpleClass.grade)}${selectedSimpleClass.institutionTag ? `｜${h(selectedSimpleClass.institutionTag)}` : ""}</span>
+    `;
   }
   const courseType = hasTemplate ? activeTemplate.courseType : simpleType;
-  $("allPresentBtn").classList.toggle("hidden", courseType !== "classCourse");
-  $("trialStudentsWrap").classList.toggle("hidden", courseType !== "classCourse");
+  const isSavedGroup = Boolean(hasTemplate && activeTemplate.courseType === "classCourse" ? getClass(activeTemplate.classId) : getClass($("simpleClass").value));
+  $("allPresentBtn").classList.toggle("hidden", !isSavedGroup);
+  $("trialStudentsWrap").classList.toggle("hidden", !(isSavedGroup && courseType === "classCourse"));
   $("attendanceList").innerHTML = lessonAttendance.length ? lessonAttendance.map((item) => {
-    if (courseType === "classCourse") {
+    if (isSavedGroup) {
       return `
         <button type="button" class="attendance-card ${item.status} ${item.isTrial ? "trial" : ""}" onclick="cycleAttendance('${item.studentId}')">
           <strong>${h(item.name)}</strong>
@@ -834,8 +842,8 @@ function renderAttendanceSummary() {
 }
 
 function cycleAttendance(studentId) {
-  const isClass = activeTemplate ? activeTemplate.courseType === "classCourse" : $("simpleCourseType").value === "classCourse";
-  if (!isClass) return;
+  const canTakeAttendance = activeTemplate ? activeTemplate.courseType === "classCourse" : Boolean(getClass($("simpleClass").value));
+  if (!canTakeAttendance) return;
   lessonAttendance = lessonAttendance.map((item) => {
     if (item.studentId !== studentId) return item;
     const next = STATUS_ORDER[(STATUS_ORDER.indexOf(item.status) + 1) % STATUS_ORDER.length];
@@ -846,8 +854,9 @@ function cycleAttendance(studentId) {
 }
 
 function syncTrialStudents() {
-  const isClass = activeTemplate ? activeTemplate.courseType === "classCourse" : $("simpleCourseType").value === "classCourse";
-  if (!isClass) return;
+  const selectedClass = getClass($("simpleClass").value);
+  const canAddTrials = activeTemplate ? activeTemplate.courseType === "classCourse" : classCourseType(selectedClass) === "classCourse";
+  if (!canAddTrials) return;
   const existing = lessonAttendance.filter((item) => !item.isTrial);
   const trials = parseTrialStudentNames($("trialStudentsInput").value).map((name, index) => ({
     studentId: `trial-${index}`,
@@ -875,11 +884,11 @@ function renderSavedLessonTargets() {
   }));
   const classOptions = state.classes.map((classItem) => ({
     value: `class:${classItem.id}`,
-    label: `${classItem.name}${classItem.institutionTag ? `｜${classItem.institutionTag}` : ""}`
+    label: `${classItem.name}｜${COURSE_TYPES[classCourseType(classItem)]}${classItem.institutionTag ? `｜${classItem.institutionTag}` : ""}`
   }));
   $("savedLessonTarget").innerHTML = [
-    `<option value="">选择已保存学生或班级</option>`,
-    classOptions.length ? `<optgroup label="班级">${classOptions.map((item) => `<option value="${h(item.value)}">${h(item.label)}</option>`).join("")}</optgroup>` : "",
+    `<option value="">选择已保存班级/课程</option>`,
+    classOptions.length ? `<optgroup label="班级/课程">${classOptions.map((item) => `<option value="${h(item.value)}">${h(item.label)}</option>`).join("")}</optgroup>` : "",
     studentOptions.length ? `<optgroup label="学生">${studentOptions.map((item) => `<option value="${h(item.value)}">${h(item.label)}</option>`).join("")}</optgroup>` : ""
   ].join("");
   if ([...studentOptions, ...classOptions].some((item) => item.value === current)) $("savedLessonTarget").value = current;
@@ -888,6 +897,7 @@ function renderSavedLessonTargets() {
 function applySavedLessonTarget() {
   const value = $("savedLessonTarget").value;
   if (!value) {
+    $("simpleClass").value = "";
     $("simpleStudentNames").value = "";
     $("simpleStudentTag").value = "";
     buildSimpleAttendance();
@@ -899,7 +909,7 @@ function applySavedLessonTarget() {
   if (kind === "class") {
     const classItem = getClass(id);
     if (!classItem) return;
-    $("simpleCourseType").value = "classCourse";
+    $("simpleCourseType").value = classCourseType(classItem);
     $("simpleGrade").value = classItem.grade;
     $("simpleStudentNames").value = "";
     $("simpleStudentTag").value = classItem.institutionTag || "";
@@ -910,6 +920,7 @@ function applySavedLessonTarget() {
     if (!student) return;
     $("simpleCourseType").value = "oneToOne";
     $("simpleGrade").value = student.grade;
+    $("simpleClass").value = "";
     $("simpleStudentNames").value = student.name;
     $("simpleStudentTag").value = student.institutionTag || "";
   }
@@ -925,23 +936,51 @@ function simpleCourseSize(type) {
   return { oneToOne: 1, oneToTwo: 2, oneToThree: 3, oneToFour: 4 }[type] || 0;
 }
 
-function renderSimpleLessonPickers() {
-  const type = $("simpleCourseType").value;
-  const grade = $("simpleGrade").value;
-  const isClass = type === "classCourse";
-  $("simpleStudentsWrap").classList.toggle("hidden", isClass);
-  $("simpleClassWrap").classList.toggle("hidden", !isClass);
-  $("trialStudentsWrap").classList.toggle("hidden", !isClass);
-  $("allPresentBtn").classList.toggle("hidden", !isClass);
+function inferCourseTypeFromCount(count) {
+  if (count <= 1) return "oneToOne";
+  if (count === 2) return "oneToTwo";
+  if (count === 3) return "oneToThree";
+  if (count === 4) return "oneToFour";
+  return "classCourse";
+}
 
+function classActiveStudents(classItem) {
+  return (classItem?.students || []).filter((student) => student.status !== "inactive");
+}
+
+function classCourseType(classItem) {
+  return normalizeCourseType(classItem?.courseType) || inferCourseTypeFromCount(classActiveStudents(classItem).length);
+}
+
+function classStudentsAsLessonStudents(classItem) {
+  return classActiveStudents(classItem).map((student) => ({
+    id: student.id,
+    name: student.name,
+    grade: classItem.grade,
+    institutionTag: classItem.institutionTag || "",
+    specialOne: null,
+    note: student.note || ""
+  }));
+}
+
+function renderSimpleLessonPickers() {
+  const grade = $("simpleGrade").value;
   const selectedClass = $("simpleClass").value;
   const classes = state.classes.filter((item) => item.grade === grade);
-  $("simpleClass").innerHTML = `<option value="">${classes.length ? "选择班级" : "当前年级还没有班级"}</option>` + classes
-    .map((item) => `<option value="${item.id}">${h(item.name)}${item.institutionTag ? `｜${h(item.institutionTag)}` : ""}</option>`)
+  $("simpleClass").innerHTML = `<option value="">${classes.length ? "选择班级/课程" : "当前年级还没有班级/课程"}</option>` + classes
+    .map((item) => `<option value="${item.id}">${h(item.name)}｜${h(COURSE_TYPES[classCourseType(item)])}${item.institutionTag ? `｜${h(item.institutionTag)}` : ""}</option>`)
     .join("");
   if (classes.some((item) => item.id === selectedClass)) $("simpleClass").value = selectedClass;
   const selectedClassItem = getClass($("simpleClass").value);
-  if (isClass && selectedClassItem?.settlementMode === "perHead") {
+  const type = selectedClassItem ? classCourseType(selectedClassItem) : $("simpleCourseType").value;
+  $("simpleCourseType").value = type;
+  const hasSavedClass = Boolean(selectedClassItem);
+  $("simpleStudentsWrap").classList.toggle("hidden", hasSavedClass);
+  $("simpleClassWrap").classList.add("hidden");
+  $("trialStudentsWrap").classList.toggle("hidden", !hasSavedClass);
+  $("allPresentBtn").classList.toggle("hidden", !hasSavedClass);
+
+  if (selectedClassItem?.settlementMode === "perHead") {
     $("simpleSettlementMode").value = "perHead";
     $("simplePerStudentPrice").value = selectedClassItem.settlementPerStudent ?? "";
   }
@@ -949,7 +988,7 @@ function renderSimpleLessonPickers() {
 
   const limit = simpleCourseSize(type);
   const count = parseNames($("simpleStudentNames").value).length;
-  $("simpleStudentHint").textContent = limit ? `请填写 ${limit} 名学生，当前 ${count} 名` : "班课请直接选择班级";
+  $("simpleStudentHint").textContent = limit ? `请填写 ${limit} 名学生，当前 ${count} 名` : "临时班课请填写学生姓名";
   buildSimpleAttendance();
   renderLessonPickers();
 }
@@ -970,11 +1009,9 @@ function simpleNamedStudents({ create = false } = {}) {
 }
 
 function buildSimpleAttendance() {
-  const type = $("simpleCourseType").value;
-  if (type === "classCourse") {
-    const classItem = getClass($("simpleClass").value);
-    lessonAttendance = (classItem?.students || [])
-      .filter((student) => student.status !== "inactive")
+  const classItem = getClass($("simpleClass").value);
+  if (classItem) {
+    lessonAttendance = classActiveStudents(classItem)
       .map((student) => ({ studentId: student.id, name: student.name, status: "present" }));
     syncTrialStudents();
     return;
@@ -984,11 +1021,11 @@ function buildSimpleAttendance() {
 }
 
 function simpleLessonData() {
-  const type = $("simpleCourseType").value;
-  const selectedClass = type === "classCourse" ? getClass($("simpleClass").value) : null;
-  const selectedStudents = type === "classCourse" ? [] : simpleNamedStudents();
+  const selectedClass = getClass($("simpleClass").value);
+  const type = selectedClass ? classCourseType(selectedClass) : $("simpleCourseType").value;
+  const selectedStudents = selectedClass ? classStudentsAsLessonStudents(selectedClass) : simpleNamedStudents();
   return {
-    grade: $("simpleGrade").value,
+    grade: selectedClass?.grade || $("simpleGrade").value,
     courseType: type,
     selectedStudents,
     selectedClass,
@@ -1000,7 +1037,7 @@ function simpleLessonData() {
 
 function simpleCourseName(data) {
   if (activeTemplate) return activeTemplate.name;
-  if (data.courseType === "classCourse") return data.selectedClass?.name || COURSE_TYPES.classCourse;
+  if (data.selectedClass) return data.selectedClass.name || COURSE_TYPES[data.courseType];
   const names = data.selectedStudents.map((student) => student.name).join("、");
   return names || COURSE_TYPES[data.courseType] || "课程";
 }
@@ -1063,7 +1100,7 @@ function calculateWage({ grade, courseType, selectedStudents, selectedClass, att
 }
 
 function calculateLessonSettlementAmount({ wageAmount, courseType, selectedClass, attendance, settlementMode, perStudentPrice }) {
-  const usePerHead = settlementMode === "perHead" || (courseType === "classCourse" && selectedClass?.settlementMode === "perHead");
+  const usePerHead = settlementMode === "perHead" || selectedClass?.settlementMode === "perHead";
   if (usePerHead) {
     const price = Number(perStudentPrice ?? selectedClass?.settlementPerStudent ?? 0);
     const presentCount = attendance.filter((item) => item.status === "present").length;
@@ -1104,13 +1141,14 @@ function calculateDisplayAmount(data, wageResult) {
 }
 
 function updateLessonCalculation() {
-  if (!activeTemplate && !($("simpleCourseType")?.value)) {
+  const selectedSimpleClass = getClass($("simpleClass")?.value);
+  if (!activeTemplate && !selectedSimpleClass && !($("simpleCourseType")?.value)) {
     $("computedAmount").textContent = money(0);
-    $("priceSource").textContent = "请选择课程类型后自动计算";
+    $("priceSource").textContent = "从已保存班级/课程里选择后自动计算";
     $("calcWarning").classList.add("hidden");
     return;
   }
-  if (!activeTemplate && !$("savedLessonTarget").value && !$("simpleStudentNames").value.trim() && $("simpleCourseType").value !== "classCourse") {
+  if (!activeTemplate && !selectedSimpleClass && !$("savedLessonTarget").value && !$("simpleStudentNames").value.trim() && $("simpleCourseType").value !== "classCourse") {
     $("computedAmount").textContent = money(0);
     $("priceSource").textContent = "从已保存学生或班级里选择后自动计算";
     $("calcWarning").classList.add("hidden");
@@ -1127,8 +1165,9 @@ function updateLessonCalculation() {
 
 function saveLesson(event) {
   event.preventDefault();
-  if (!$("savedLessonTarget").value && !$("simpleStudentNames").value.trim() && $("simpleCourseType").value !== "classCourse") return alert("请先从已保存里选择学生或班级，或者使用下方临时一节课。");
-  if (!activeTemplate && $("simpleCourseType").value !== "classCourse") simpleNamedStudents({ create: true });
+  const selectedSimpleClass = getClass($("simpleClass").value);
+  if (!$("savedLessonTarget").value && !selectedSimpleClass && !$("simpleStudentNames").value.trim() && $("simpleCourseType").value !== "classCourse") return alert("请先从已保存里选择学生或班级，或者使用下方临时一节课。");
+  if (!activeTemplate && !selectedSimpleClass && $("simpleCourseType").value !== "classCourse") simpleNamedStudents({ create: true });
   if (!activeTemplate) buildSimpleAttendance();
   const data = getSelectedLessonData();
   const result = calculateWage(data);
@@ -1253,6 +1292,7 @@ function resetLessonForm(keepDate = $("lessonDate").value || datetimeInputValue(
   $("manualAmount").value = "";
   $("lessonNote").value = "";
   $("trialStudentsInput").value = "";
+  $("simpleClass").value = "";
   $("simpleStudentNames").value = "";
   $("simpleStudentTag").value = "";
   activeTemplate = null;
@@ -1284,7 +1324,8 @@ function editLesson(id) {
   lessonAttendance = normalizedAttendance(record);
   $("simpleCourseType").value = record.courseType || "oneToOne";
   $("simpleGrade").value = record.grade || GRADES[0];
-  $("simpleStudentNames").value = record.courseType === "classCourse" ? "" : lessonAttendance.map((item) => item.name).join("、");
+  $("simpleClass").value = record.classId || "";
+  $("simpleStudentNames").value = record.classId ? "" : lessonAttendance.map((item) => item.name).join("、");
   $("simpleStudentTag").value = record.institutionTag || "";
   $("savedLessonTarget").value = record.classId ? `class:${record.classId}` : "";
   if (!record.classId) {
@@ -1639,6 +1680,7 @@ function saveClass(event) {
     id,
     name: $("className").value.trim(),
     grade: $("classGrade").value,
+    courseType: $("classCourseType").value,
     institutionTag: normalizeTag($("classTag").value),
     students: editingClassStudents.filter((student) => student.name).map((student) => ({ ...student })),
     smallBasePrice: null,
@@ -1659,6 +1701,7 @@ function resetClassForm(shouldRender = true) {
   $("classId").value = "";
   $("className").value = "";
   $("classGrade").value = GRADES[0];
+  $("classCourseType").value = "oneToOne";
   $("classTag").value = "";
   $("classSettlementPerStudent").value = "";
   $("classBulkStudents").value = "";
@@ -1678,7 +1721,7 @@ function renderClasses() {
       <article class="item">
         <div class="item-head">
           <strong>${h(classItem.name)}</strong>
-          <span class="muted">${h([classItem.grade, classItem.institutionTag].filter(Boolean).join("｜"))}</span>
+          <span class="muted">${h([classItem.grade, COURSE_TYPES[classCourseType(classItem)], classItem.institutionTag].filter(Boolean).join("｜"))}</span>
         </div>
         <p>${h(settlement)}</p>
         <p>在读：${h(active.map((student) => student.name).join("、") || "暂无")}</p>
@@ -1699,6 +1742,7 @@ function editClass(id) {
   $("classId").value = classItem.id;
   $("className").value = classItem.name;
   $("classGrade").value = classItem.grade;
+  $("classCourseType").value = classCourseType(classItem);
   $("classTag").value = classItem.institutionTag || "";
   $("classSettlementPerStudent").value = classItem.settlementPerStudent ?? "";
   $("classNote").value = classItem.note || "";
@@ -2442,7 +2486,7 @@ function sum(records) {
 
 function recordSettlementAmount(record) {
   if (record.settlementAmount !== null && record.settlementAmount !== undefined) return Number(record.settlementAmount || 0);
-  const classItem = record.courseType === "classCourse" ? getClass(record.classId) : null;
+  const classItem = getClass(record.classId);
   if (classItem?.settlementMode === "perHead") {
     const price = Number(classItem.settlementPerStudent || 0);
     const presentCount = normalizedAttendance(record).filter((item) => item.status === "present").length;
@@ -2453,7 +2497,7 @@ function recordSettlementAmount(record) {
 
 function recordSettlementSource(record) {
   if (record.settlementSource) return record.settlementSource;
-  const classItem = record.courseType === "classCourse" ? getClass(record.classId) : null;
+  const classItem = getClass(record.classId);
   if (classItem?.settlementMode === "perHead") {
     const price = Number(classItem.settlementPerStudent || 0);
     const presentCount = normalizedAttendance(record).filter((item) => item.status === "present").length;

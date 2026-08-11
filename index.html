@@ -152,7 +152,7 @@
 
             <div class="simple-lesson">
               <div class="form-grid">
-                <label>课程类型
+                <label class="hidden">课程类型
                   <select id="simpleCourseType">
                     <option value="oneToOne">一对一</option>
                     <option value="oneToTwo">一对二</option>
@@ -174,13 +174,13 @@
                   <input id="simplePerStudentPrice" type="number" min="0" step="1" placeholder="例如：80">
                 </label>
               </div>
-              <label id="simpleClassWrap">选择班级
+              <label id="simpleClassWrap" class="hidden">选择班级/课程
                 <select id="simpleClass"></select>
               </label>
               <div id="simpleStudentsWrap" class="student-picker">
                 <div class="picker-head">
                   <strong>学生姓名</strong>
-                  <span id="simpleStudentHint">按课程类型填写对应人数</span>
+                  <span id="simpleStudentHint">临时课可填写学生姓名</span>
                 </div>
                 <textarea id="simpleStudentNames" rows="3" placeholder="例如：张三、李四。也可以每行一个姓名"></textarea>
                 <label>机构标签
@@ -484,16 +484,25 @@
         <div class="layout two-col">
           <form id="classForm" class="panel">
             <div class="section-title">
-              <h2>班级资料</h2>
+              <h2>班级/课程资料</h2>
               <button type="button" id="resetClassBtn" class="ghost small">新增</button>
             </div>
             <input type="hidden" id="classId">
             <div class="form-grid">
-              <label>班级名称
-                <input id="className" type="text" required placeholder="例如：高一A班">
+              <label>班级/课程名称
+                <input id="className" type="text" required placeholder="例如：高一A班、张三一对一">
               </label>
               <label>年级
                 <select id="classGrade"></select>
+              </label>
+              <label>课程类型
+                <select id="classCourseType">
+                  <option value="oneToOne">一对一</option>
+                  <option value="oneToTwo">一对二</option>
+                  <option value="oneToThree">一对三</option>
+                  <option value="oneToFour">一对四</option>
+                  <option value="classCourse">班课(5人+)</option>
+                </select>
               </label>
               <label>自定义每人收费
                 <input id="classSettlementPerStudent" type="number" min="0" step="1" placeholder="不填则按聚能结算">
@@ -508,7 +517,7 @@
             <button id="addClassStudentsBtn" class="secondary" type="button">添加到班级名单</button>
             <div class="student-picker">
               <div class="picker-head">
-                <strong>班级学生名单</strong>
+                <strong>学生名单</strong>
                 <span>点“停用”后不会出现在新课点名里</span>
               </div>
               <div id="classStudentList" class="class-student-list"></div>
