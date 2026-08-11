@@ -150,8 +150,8 @@ function migrateState(data) {
       })),
       smallBasePrice: classItem.smallBasePrice ?? null,
       extraPerStudent: classItem.extraPerStudent ?? 10,
-      settlementMode: classItem.settlementMode || "wage",
-      settlementPerStudent: classItem.settlementPerStudent ?? classItem.perStudentSettlementPrice ?? null,
+      settlementMode: numberOrNull(classItem.settlementPerStudent ?? classItem.perStudentSettlementPrice) === null ? (classItem.settlementMode || "wage") : "perHead",
+      settlementPerStudent: numberOrNull(classItem.settlementPerStudent ?? classItem.perStudentSettlementPrice),
       note: classItem.note || ""
     };
   });
@@ -980,9 +980,16 @@ function renderSimpleLessonPickers() {
   $("trialStudentsWrap").classList.toggle("hidden", !hasSavedClass);
   $("allPresentBtn").classList.toggle("hidden", !hasSavedClass);
 
-  if (selectedClassItem?.settlementMode === "perHead") {
-    $("simpleSettlementMode").value = "perHead";
-    $("simplePerStudentPrice").value = selectedClassItem.settlementPerStudent ?? "";
+  if (selectedClassItem) {
+    const classPrice = numberOrNull(selectedClassItem.settlementPerStudent);
+    const classMode = selectedClassItem.settlementMode === "perHead" || classPrice !== null ? "perHead" : "wage";
+    $("simpleSettlementMode").value = classMode;
+    $("simplePerStudentPrice").value = classMode === "perHead" ? classPrice ?? "" : "";
+    $("simpleSettlementMode").disabled = true;
+    $("simplePerStudentPrice").disabled = true;
+  } else {
+    $("simpleSettlementMode").disabled = false;
+    $("simplePerStudentPrice").disabled = false;
   }
   $("simplePerStudentWrap").classList.toggle("hidden", $("simpleSettlementMode").value !== "perHead");
 
@@ -1116,13 +1123,17 @@ function calculateLessonSettlementAmount({ wageAmount, courseType, selectedClass
 }
 
 function getLessonSettlementInput(data) {
-  const classCustomPrice = data.selectedClass?.settlementPerStudent;
-  const hasClassCustomPrice = classCustomPrice !== null && classCustomPrice !== undefined && classCustomPrice !== "";
+  if (data.selectedClass) {
+    const classPrice = numberOrNull(data.selectedClass.settlementPerStudent);
+    const classMode = data.selectedClass.settlementMode === "perHead" || classPrice !== null ? "perHead" : "wage";
+    return {
+      settlementMode: classMode,
+      perStudentPrice: classMode === "perHead" ? classPrice : null
+    };
+  }
   return {
-    settlementMode: hasClassCustomPrice ? "perHead" : $("simpleSettlementMode").value,
-    perStudentPrice: hasClassCustomPrice
-      ? numberOrNull(data.selectedClass.settlementPerStudent)
-      : numberOrNull($("simplePerStudentPrice").value)
+    settlementMode: $("simpleSettlementMode").value,
+    perStudentPrice: numberOrNull($("simplePerStudentPrice").value)
   };
 }
 
