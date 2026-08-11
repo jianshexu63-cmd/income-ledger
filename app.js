@@ -1733,7 +1733,6 @@ function renderDashboard() {
   renderMonthlyIncomeList(year);
   renderIncomeSourceList(mainYear, settlementsYear);
   renderPendingSettlementList(pendingYear);
-  renderDashboardPayrollList(state.records.filter((record) => recordMonth(record) === currentMonth()));
 }
 
 function renderMonthlyIncomeList(year) {
@@ -1784,17 +1783,6 @@ function renderPendingSettlementList(records) {
       <p>${group.count} 次课｜${h(group.kind)}｜${h(group.dates.join("、"))}</p>
     </article>
   `).join("") : `<div class="empty">今年副业课时都已结算。</div>`;
-}
-
-function renderDashboardPayrollList(records) {
-  const rows = payrollRowsFromRecords(records);
-  $("dashboardPayrollList").innerHTML = rows.length ? rows.slice(0, 8).map((row) => `
-    <article class="compact-item">
-      <strong>${h(row.owner)}｜${h(row.target)} ${money(row.amount)}</strong>
-      <p>${h(row.courseName)}｜${h(row.typeText)}｜${row.count} 次</p>
-      <p>${h(row.dateText)}${row.note ? `｜${h(row.note)}` : ""}</p>
-    </article>
-  `).join("") : `<div class="empty">本月还没有发工资数据。</div>`;
 }
 
 function renderSettlementPage() {
@@ -2085,6 +2073,7 @@ function renderStats() {
   renderStatNumbers(todayRecords, monthRecords, displayRecords);
   renderTodayRecords(todayRecords);
   renderPayrollTable(displayRecords);
+  renderPayrollOverview(displayRecords);
 }
 
 function renderTagFilter() {
@@ -2143,6 +2132,57 @@ function renderPayrollTable(records) {
       <td>${h(row.note || "")}</td>
     </tr>
   `).join("") : `<tr><td colspan="8">暂无发工资数据。</td></tr>`;
+}
+
+function renderPayrollOverview(records) {
+  const rows = payrollRowsFromRecords(records);
+  const ownerRows = summarizePayrollRows(rows, (row) => row.owner);
+  const targetRows = summarizePayrollRows(rows, (row) => `${row.owner}｜${row.target}`).slice(0, 8);
+  const typeRows = summarizePayrollRows(rows, (row) => row.typeText || "未分类");
+  $("payrollOverview").innerHTML = rows.length ? `
+    <section class="payroll-card payroll-total-card">
+      <span>当前筛选</span>
+      <strong>${money(payrollRowsTotal(rows))}</strong>
+      <p>${records.length} 节课，合并为 ${rows.length} 条工资项</p>
+    </section>
+    <section class="payroll-card">
+      <h3>按归属汇总</h3>
+      ${renderPayrollSummaryRows(ownerRows)}
+    </section>
+    <section class="payroll-card">
+      <h3>按结算对象</h3>
+      ${renderPayrollSummaryRows(targetRows)}
+    </section>
+    <section class="payroll-card">
+      <h3>按课程类型</h3>
+      ${renderPayrollSummaryRows(typeRows)}
+    </section>
+  ` : `<div class="empty">当前筛选下没有工资数据。</div>`;
+}
+
+function summarizePayrollRows(rows, keyGetter) {
+  const groups = new Map();
+  rows.forEach((row) => {
+    const key = keyGetter(row);
+    if (!groups.has(key)) groups.set(key, { name: key, amount: 0, count: 0, items: 0 });
+    const group = groups.get(key);
+    group.amount += Number(row.amount || 0);
+    group.count += Number(row.count || 0);
+    group.items += 1;
+  });
+  return Array.from(groups.values()).sort((a, b) => b.amount - a.amount || a.name.localeCompare(b.name, "zh-CN"));
+}
+
+function renderPayrollSummaryRows(rows) {
+  return rows.length ? rows.map((row) => `
+    <div class="payroll-summary-row">
+      <div>
+        <strong>${h(row.name)}</strong>
+        <span>${row.count} 次｜${row.items} 项</span>
+      </div>
+      <em>${money(row.amount)}</em>
+    </div>
+  `).join("") : `<div class="empty">暂无数据。</div>`;
 }
 
 function payrollRowsFromRecords(records) {

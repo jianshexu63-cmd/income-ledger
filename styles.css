@@ -825,6 +825,79 @@ textarea:focus {
   overflow-x: auto;
 }
 
+.payroll-overview {
+  display: grid;
+  grid-template-columns: 1.1fr repeat(3, 1fr);
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.payroll-card {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 132px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fbfa;
+}
+
+.payroll-card h3,
+.payroll-card p {
+  margin: 0;
+}
+
+.payroll-card h3 {
+  color: #233039;
+  font-size: 15px;
+}
+
+.payroll-total-card {
+  background: var(--primary);
+  color: white;
+}
+
+.payroll-total-card span,
+.payroll-total-card p {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.payroll-total-card strong {
+  font-size: 30px;
+}
+
+.payroll-summary-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.payroll-summary-row:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.payroll-summary-row div {
+  display: grid;
+  gap: 2px;
+}
+
+.payroll-summary-row span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.payroll-summary-row em {
+  flex: 0 0 auto;
+  color: var(--primary);
+  font-style: normal;
+  font-weight: 850;
+}
+
 table {
   width: 100%;
   min-width: 760px;
@@ -1038,6 +1111,7 @@ th {
   .form-grid,
   .filters,
   .stats-grid,
+  .payroll-overview,
   .overview-hero,
   .hero-metrics,
   .month-row {

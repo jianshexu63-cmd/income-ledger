@@ -82,8 +82,6 @@
             <div id="incomeSourceList" class="source-list"></div>
             <h3>待处理结算</h3>
             <div id="pendingSettlementList" class="compact-list"></div>
-            <h3>本月发工资表</h3>
-            <div id="dashboardPayrollList" class="compact-list"></div>
           </section>
           <aside class="settlement-column">
             <form id="settlementForm" class="panel">
@@ -144,7 +142,7 @@
             <input type="hidden" id="lessonId">
             <input type="hidden" id="selectedTemplateId">
 
-            <label class="record-date-row">开始时间
+            <label class="record-date-row">上课开始时间
               <input id="lessonDate" type="datetime-local" required>
             </label>
 
@@ -412,13 +410,14 @@
             </label>
           </div>
           <div class="stats-grid">
-            <div class="stat"><span>今日应发</span><strong id="statsTodayTotal">¥0</strong></div>
-            <div class="stat"><span>本月应发</span><strong id="statsMonthTotal">¥0</strong></div>
-            <div class="stat"><span>当前筛选总额</span><strong id="statsTotal">¥0</strong></div>
-            <div class="stat"><span>当前筛选课次</span><strong id="statsCount">0</strong></div>
+            <div class="stat"><span>今日工资</span><strong id="statsTodayTotal">¥0</strong></div>
+            <div class="stat"><span>本月工资</span><strong id="statsMonthTotal">¥0</strong></div>
+            <div class="stat"><span>筛选工资</span><strong id="statsTotal">¥0</strong></div>
+            <div class="stat"><span>筛选课次</span><strong id="statsCount">0</strong></div>
             <div class="stat"><span>聚能本月汇总</span><strong id="oneTotal">¥0</strong><em id="oneCount">0 次</em></div>
             <div class="stat"><span>自有本月汇总</span><strong id="classTotal">¥0</strong><em id="classCount">0 人次</em></div>
           </div>
+          <div id="payrollOverview" class="payroll-overview"></div>
           <div class="table-wrap">
             <table>
               <thead>
