@@ -29,6 +29,7 @@ const DEFAULT_STANDARDS = {
 };
 const STORE_KEY = "teacher-payroll-v1";
 const MIGRATION_KEY = "teacher-payroll-cloud-migrated-v1";
+const REMEMBER_LOGIN_KEY = "teacher-payroll-remember-login";
 const LOCAL_ONLY = false;
 const CLOUD_STATE_TABLE = "app_states";
 
@@ -329,7 +330,17 @@ async function initSupabase() {
     isBootstrapping = false;
     return;
   }
-  supabaseClient = window.supabase.createClient(config.url, config.anonKey);
+  const rememberLogin = localStorage.getItem(REMEMBER_LOGIN_KEY) !== "false";
+  $("rememberLogin").checked = rememberLogin;
+  supabaseClient = window.supabase.createClient(config.url, config.anonKey, {
+    auth: {
+      persistSession: rememberLogin,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      storage: rememberLogin ? window.localStorage : window.sessionStorage,
+      storageKey: "income-ledger-auth"
+    }
+  });
   const { data } = await supabaseClient.auth.getSession();
   currentUser = data.session?.user || null;
   supabaseClient.auth.onAuthStateChange(async (_event, session) => {
@@ -374,6 +385,7 @@ async function enterApp() {
 
 async function loginUser() {
   if (!supabaseClient) return $("authMessage").textContent = "请先配置 Supabase。";
+  localStorage.setItem(REMEMBER_LOGIN_KEY, $("rememberLogin").checked ? "true" : "false");
   const email = $("authEmail").value.trim();
   const password = $("authPassword").value;
   if (!email || !password) return $("authMessage").textContent = "请填写邮箱和密码。";
@@ -388,6 +400,7 @@ async function loginUser() {
 
 async function registerUser() {
   if (!supabaseClient) return $("authMessage").textContent = "请先配置 Supabase。";
+  localStorage.setItem(REMEMBER_LOGIN_KEY, $("rememberLogin").checked ? "true" : "false");
   const email = $("authEmail").value.trim();
   const password = $("authPassword").value;
   if (!email || !password) return $("authMessage").textContent = "请填写邮箱和密码。";

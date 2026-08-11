@@ -61,6 +61,18 @@ body {
   gap: 10px;
 }
 
+.inline-check {
+  align-items: center;
+  flex-direction: row;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.inline-check input {
+  width: auto;
+  min-height: 0;
+}
+
 .auth-message {
   min-height: 22px;
   color: var(--danger);
