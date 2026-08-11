@@ -49,6 +49,31 @@ const today = () => new Date().toISOString().slice(0, 10);
 const currentMonth = () => today().slice(0, 7);
 const money = (value) => `¥${Number(value || 0).toLocaleString("zh-CN")}`;
 const numberOrNull = (value) => value === "" || value === null || Number.isNaN(Number(value)) ? null : Number(value);
+const pad2 = (value) => String(value).padStart(2, "0");
+const datetimeInputValue = (date = new Date()) => `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+const addHoursToInput = (value, hours) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  date.setHours(date.getHours() + hours);
+  return datetimeInputValue(date);
+};
+const recordDate = (record) => (record.date || record.startAt || "").slice(0, 10);
+const recordMonth = (record) => recordDate(record).slice(0, 7);
+const recordYear = (record) => recordDate(record).slice(0, 4);
+const compactDate = (value) => {
+  const date = String(value || "").slice(0, 10);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  return match ? `${match[1]}.${Number(match[2])}.${Number(match[3])}` : date;
+};
+const displayLessonTime = (record) => {
+  const start = record.startAt || record.date || "";
+  const end = record.endAt || (start.includes("T") ? addHoursToInput(start, 2) : "");
+  const dateText = compactDate(start);
+  if (!start.includes("T")) return dateText;
+  const startTime = start.slice(11, 16);
+  const endTime = end ? end.slice(11, 16) : "";
+  return `${dateText} ${startTime}${endTime ? `-${endTime}` : ""}`;
+};
 const normalizeCourseType = (type) => type === "smallClass" || type === "multi" ? "classCourse" : type;
 const normalizeTag = (value) => String(value || "").trim();
 const h = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -141,6 +166,9 @@ function migrateState(data) {
   });
   const records = (data.records || []).map((record) => ({
     ...record,
+    date: recordDate(record),
+    startAt: record.startAt || (record.date?.includes("T") ? record.date : ""),
+    endAt: record.endAt || (record.startAt ? addHoursToInput(record.startAt, 2) : ""),
     courseType: normalizeCourseType(record.courseType),
     institutionTag: normalizeTag(record.institutionTag || record.tag || record.sourceTag),
     settlementAmount: record.settlementAmount ?? null,
@@ -209,7 +237,7 @@ function scheduleCloudSync() {
 
 function init() {
   ["studentGrade", "studentGradeFilter", "classGrade", "templateGrade", "simpleGrade"].forEach((id) => fillGradeSelect($(id), id === "studentGradeFilter"));
-  $("lessonDate").value = today();
+  $("lessonDate").value = datetimeInputValue();
   $("filterDate").value = "";
   $("filterMonth").value = currentMonth();
   $("todayLine").textContent = `${today()}，上完课，点模板，记工资。`;
@@ -635,7 +663,9 @@ function toRecordRow(record, userId, now) {
   return {
     id: record.id,
     user_id: userId,
-    date: record.date,
+    date: recordDate(record),
+    start_at: record.startAt || null,
+    end_at: record.endAt || null,
     template_id: record.templateId || null,
     course_name: record.courseName || "",
     course_type: record.courseType,
@@ -663,6 +693,8 @@ function fromRecordRow(row) {
   return {
     id: row.id,
     date: row.date,
+    startAt: row.start_at || "",
+    endAt: row.end_at || "",
     templateId: row.template_id || "",
     courseName: row.course_name || "",
     courseType: row.course_type,
@@ -1106,11 +1138,14 @@ function saveLesson(event) {
   if (result.warnings.length && !hasManual) return alert(`${result.warnings.join("；")}。如确实要保存，请填写本次实际工资。`);
   const courseName = simpleCourseName(data);
   const duplicateKey = activeTemplate?.id || `${data.courseType}-${data.selectedClass?.id || data.selectedStudents.map((student) => student.id).join("-")}`;
-  if (state.records.some((record) => record.date === $("lessonDate").value && (record.templateId || record.simpleKey) === duplicateKey && record.id !== $("lessonId").value)) {
-    if (!confirm("今天已经记录过这节课，是否继续保存？")) return;
+  const startAt = $("lessonDate").value;
+  if (state.records.some((record) => (record.startAt || record.date) === startAt && (record.templateId || record.simpleKey) === duplicateKey && record.id !== $("lessonId").value)) {
+    if (!confirm("这个时间已经记录过这节课，是否继续保存？")) return;
   }
   const counts = attendanceCounts(data.attendance);
   const id = $("lessonId").value || uid();
+  const endAt = addHoursToInput(startAt, 2);
+  const lessonDay = startAt.slice(0, 10);
   const settlementInfo = calculateLessonSettlementAmount({
     wageAmount: result.amount,
     courseType: data.courseType,
@@ -1125,7 +1160,9 @@ function saveLesson(event) {
   const finalSource = savedSettlementInfo.source;
   const record = {
     id,
-    date: $("lessonDate").value,
+    date: lessonDay,
+    startAt,
+    endAt,
     templateId: activeTemplate?.id || "",
     simpleKey: duplicateKey,
     courseName,
@@ -1156,7 +1193,7 @@ function saveLesson(event) {
     const template = state.courseTemplates.find((item) => item.id === activeTemplate.id);
     if (template) template.lastUsedAt = new Date().toISOString();
   }
-  state.records.sort((a, b) => b.date.localeCompare(a.date));
+  state.records.sort((a, b) => (b.startAt || b.date).localeCompare(a.startAt || a.date));
   const keepDate = $("lessonDate").value;
   saveState();
   resetLessonForm(keepDate);
@@ -1169,9 +1206,13 @@ function saveTempLesson() {
   if (!name) return alert("请填写临时课姓名或课程。");
   if (amount === null) return alert("请填写临时课价格。");
   const id = uid();
+  const startAt = $("lessonDate").value || datetimeInputValue();
+  const endAt = addHoursToInput(startAt, 2);
   const record = {
     id,
-    date: $("lessonDate").value || today(),
+    date: startAt.slice(0, 10),
+    startAt,
+    endAt,
     templateId: "",
     simpleKey: `temp-${id}`,
     courseName: name,
@@ -1196,7 +1237,7 @@ function saveTempLesson() {
     studentSettlementIds: {}
   };
   state.records.push(record);
-  state.records.sort((a, b) => b.date.localeCompare(a.date));
+  state.records.sort((a, b) => (b.startAt || b.date).localeCompare(a.startAt || a.date));
   $("tempLessonName").value = "";
   $("tempLessonTag").value = "";
   $("tempLessonAmount").value = "";
@@ -1204,7 +1245,7 @@ function saveTempLesson() {
   saveState();
 }
 
-function resetLessonForm(keepDate = $("lessonDate").value || today()) {
+function resetLessonForm(keepDate = $("lessonDate").value || datetimeInputValue()) {
   $("lessonId").value = "";
   $("selectedTemplateId").value = "";
   $("savedLessonTarget").value = "";
@@ -1237,7 +1278,7 @@ function editLesson(id) {
   }) : null;
   $("lessonId").value = record.id;
   $("selectedTemplateId").value = activeTemplate?.id || "";
-  $("lessonDate").value = record.date;
+  $("lessonDate").value = record.startAt || record.date;
   $("manualAmount").value = record.manualAmount ?? "";
   $("lessonNote").value = record.note || "";
   lessonAttendance = normalizedAttendance(record);
@@ -1678,7 +1719,7 @@ function renderDashboard() {
   const year = String(new Date().getFullYear());
   const mainYear = state.mainIncomes.filter((item) => item.month.startsWith(year));
   const settlementsYear = state.settlements.filter((item) => item.settledAt.startsWith(year) || item.month.startsWith(year));
-  const pendingYear = state.records.filter((record) => record.date.startsWith(year) && recordPendingSettlementAmount(record) > 0);
+  const pendingYear = state.records.filter((record) => recordYear(record) === year && recordPendingSettlementAmount(record) > 0);
   const mainTotal = sumMainIncome(mainYear);
   const sideSettled = settlementsYear.reduce((total, item) => total + Number(item.amount || 0), 0);
   const sidePending = sumPendingSettlement(pendingYear);
@@ -1686,10 +1727,13 @@ function renderDashboard() {
   $("yearMainIncome").textContent = money(mainTotal);
   $("yearSideSettled").textContent = money(sideSettled);
   $("yearSidePending").textContent = money(sidePending);
+  const pendingMonths = [...new Set(pendingYear.map(recordMonth))].sort();
+  $("yearSidePendingMonths").textContent = pendingMonths.length ? pendingMonths.map((month) => `${Number(month.slice(5, 7))}月`).join("、") : "无未结算";
   $("overviewYearLabel").textContent = `${year} 年`;
   renderMonthlyIncomeList(year);
   renderIncomeSourceList(mainYear, settlementsYear);
   renderPendingSettlementList(pendingYear);
+  renderDashboardPayrollList(state.records.filter((record) => recordMonth(record) === currentMonth()));
 }
 
 function renderMonthlyIncomeList(year) {
@@ -1698,7 +1742,7 @@ function renderMonthlyIncomeList(year) {
     const main = sumMainIncome(state.mainIncomes.filter((item) => item.month === month));
     const side = state.settlements.filter((item) => item.month === month || item.settledAt.startsWith(month))
       .reduce((total, item) => total + Number(item.amount || 0), 0);
-    const pending = sumPendingSettlement(state.records.filter((record) => record.date.startsWith(month)));
+    const pending = sumPendingSettlement(state.records.filter((record) => recordMonth(record) === month));
     return { month, main, side, pending, total: main + side };
   });
   const max = Math.max(...rows.map((row) => row.total + row.pending), 1);
@@ -1737,9 +1781,20 @@ function renderPendingSettlementList(records) {
   $("pendingSettlementList").innerHTML = groups.length ? groups.slice(0, 6).map((group) => `
     <article class="compact-item">
       <strong>${h(group.name)} ${money(group.amount)}</strong>
-      <p>${group.count} 次课｜${h(group.kind)}｜${h(group.months.join("、"))}</p>
+      <p>${group.count} 次课｜${h(group.kind)}｜${h(group.dates.join("、"))}</p>
     </article>
   `).join("") : `<div class="empty">今年副业课时都已结算。</div>`;
+}
+
+function renderDashboardPayrollList(records) {
+  const rows = payrollRowsFromRecords(records);
+  $("dashboardPayrollList").innerHTML = rows.length ? rows.slice(0, 8).map((row) => `
+    <article class="compact-item">
+      <strong>${h(row.owner)}｜${h(row.target)} ${money(row.amount)}</strong>
+      <p>${h(row.courseName)}｜${h(row.typeText)}｜${row.count} 次</p>
+      <p>${h(row.dateText)}${row.note ? `｜${h(row.note)}` : ""}</p>
+    </article>
+  `).join("") : `<div class="empty">本月还没有发工资数据。</div>`;
 }
 
 function renderSettlementPage() {
@@ -1785,7 +1840,7 @@ function settlementCandidateRecords() {
   const month = $("settlementMonth").value || currentMonth();
   if (!target) return [];
   return state.records.filter((record) => {
-    if (!record.date.startsWith(month)) return false;
+    if (recordMonth(record) !== month) return false;
     if (mode === "juneng") return !record.settlementId && recordInstitutionTag(record) === target;
     if (record.settlementId || recordInstitutionTag(record) === "聚能") return false;
     return recordPresentStudents(record).some((item) => studentSettlementKey(item) === target && !record.studentSettlementIds?.[target]);
@@ -1805,7 +1860,7 @@ function renderSettlementPreview() {
     : "当前条件下没有未结算课。";
   $("settlementPreviewList").innerHTML = records.length ? records.map((record) => `
     <article class="compact-item">
-      <strong>${h(record.date)} ${h(record.courseName)} ${money(settlementRecordAmountForMode(record, mode, target))}</strong>
+      <strong>${h(displayLessonTime(record))} ${h(record.courseName)} ${money(settlementRecordAmountForMode(record, mode, target))}</strong>
       <p>${h(COURSE_TYPES[record.courseType])}｜整节 ${money(recordSettlementAmount(record))}｜${h(recordSettlementSource(record))}</p>
     </article>
   `).join("") : `<div class="empty">没有可结算课时。</div>`;
@@ -1988,27 +2043,29 @@ function groupPendingRecords(records) {
     const tag = recordInstitutionTag(record);
     if (tag === "聚能") {
       if (record.settlementId) return;
-      addPendingGroup(groups, `institution|${tag}`, tag, "聚能统一", record.date, recordSettlementAmount(record));
+      addPendingGroup(groups, `institution|${tag}`, tag, "聚能统一", record, recordSettlementAmount(record));
       return;
     }
     recordPresentStudents(record).forEach((student) => {
       const key = studentSettlementKey(student);
       if (record.studentSettlementIds?.[key]) return;
-      addPendingGroup(groups, `student|${key}`, student.name || record.courseName, "学生单独", record.date, settlementRecordAmountForMode(record, "ownStudent", key));
+      addPendingGroup(groups, `student|${key}`, student.name || record.courseName, "学生单独", record, settlementRecordAmountForMode(record, "ownStudent", key));
     });
   });
   return Array.from(groups.values()).map((group) => ({
     ...group,
-    months: Array.from(group.months).sort()
+    months: Array.from(group.months).sort(),
+    dates: Array.from(group.dates).sort()
   })).sort((a, b) => b.amount - a.amount);
 }
 
-function addPendingGroup(groups, key, name, kind, date, amount) {
-  if (!groups.has(key)) groups.set(key, { name, kind, count: 0, amount: 0, months: new Set() });
+function addPendingGroup(groups, key, name, kind, record, amount) {
+  if (!groups.has(key)) groups.set(key, { name, kind, count: 0, amount: 0, months: new Set(), dates: new Set() });
   const group = groups.get(key);
   group.count += 1;
   group.amount += Number(amount || 0);
-  group.months.add(date.slice(0, 7));
+  group.months.add(recordMonth(record));
+  group.dates.add(displayLessonTime(record));
 }
 
 function renderStats() {
@@ -2017,10 +2074,10 @@ function renderStats() {
   const filterDate = $("filterDate").value;
   const filterTag = $("filterTag").value;
   const filterCourseType = $("filterCourseType").value;
-  const todayRecords = state.records.filter((record) => record.date === todayDate);
-  const monthRecords = state.records.filter((record) => record.date.startsWith(month));
+  const todayRecords = state.records.filter((record) => recordDate(record) === todayDate);
+  const monthRecords = state.records.filter((record) => recordMonth(record) === month);
   const displayRecords = state.records.filter((record) => {
-    if (filterDate ? record.date !== filterDate : !record.date.startsWith(month)) return false;
+    if (filterDate ? recordDate(record) !== filterDate : recordMonth(record) !== month) return false;
     if (filterTag && recordInstitutionTag(record) !== filterTag) return false;
     if (filterCourseType && record.courseType !== filterCourseType) return false;
     return true;
@@ -2064,7 +2121,7 @@ function renderTodayRecords(records) {
     return `
       <article class="compact-item">
         <strong>${h(record.courseName || COURSE_TYPES[record.courseType])} ${money(record.amount)}</strong>
-        <p>${h(record.grade)}｜到课 ${counts.present}｜请假 ${counts.leave}｜缺席 ${counts.absent}</p>
+        <p>${h(displayLessonTime(record))}｜${h(record.grade)}｜到课 ${counts.present}｜请假 ${counts.leave}｜缺席 ${counts.absent}</p>
         <p>${h(record.priceSource)}</p>
         ${record.note ? `<p>${h(record.note)}</p>` : ""}
       </article>
@@ -2098,7 +2155,7 @@ function payrollRowsFromRecords(records) {
         target: "聚能",
         courseName: payrollCourseName(record),
         typeText: COURSE_TYPES[record.courseType] || "",
-        date: record.date,
+        date: displayLessonTime(record),
         amount: recordSettlementAmount(record),
         note: payrollRecordNote(record)
       });
@@ -2112,7 +2169,7 @@ function payrollRowsFromRecords(records) {
         target: student.name || record.courseName,
         courseName: payrollCourseName(record),
         typeText: COURSE_TYPES[record.courseType] || "",
-        date: record.date,
+        date: displayLessonTime(record),
         amount: settlementRecordAmountForMode(record, "ownStudent", studentKey),
         note: payrollRecordNote(record, student)
       });
@@ -2185,8 +2242,8 @@ function groupRecordsForStats(records) {
     groups.get(key).push(record);
   });
   return Array.from(groups.values()).map((items) => {
-    const sorted = [...items].sort((a, b) => b.date.localeCompare(a.date));
-    const dates = [...new Set(sorted.map((record) => record.date))].sort();
+    const sorted = [...items].sort((a, b) => (b.startAt || b.date).localeCompare(a.startAt || a.date));
+    const dates = [...new Set(sorted.map(displayLessonTime))].sort();
     return {
       records: sorted,
       count: sorted.length,
@@ -2197,7 +2254,7 @@ function groupRecordsForStats(records) {
     };
   }).sort((a, b) => {
     if (a.allConfirmed !== b.allConfirmed) return a.allConfirmed ? 1 : -1;
-    return b.records[0].date.localeCompare(a.records[0].date);
+    return (b.records[0].startAt || b.records[0].date).localeCompare(a.records[0].startAt || a.records[0].date);
   });
 }
 
@@ -2207,7 +2264,7 @@ function exportCurrentMonthCsv() {
   const filterTag = $("filterTag").value;
   const filterCourseType = $("filterCourseType").value;
   const records = state.records.filter((record) => {
-    if (filterDate ? record.date !== filterDate : !record.date.startsWith(month)) return false;
+    if (filterDate ? recordDate(record) !== filterDate : recordMonth(record) !== month) return false;
     if (filterTag && recordInstitutionTag(record) !== filterTag) return false;
     if (filterCourseType && record.courseType !== filterCourseType) return false;
     return true;
@@ -2433,7 +2490,7 @@ function recordInstitutionTag(record) {
 }
 
 function updateHeaderTotal() {
-  $("headerMonthTotal").textContent = money(sum(state.records.filter((record) => record.date.startsWith(currentMonth()))));
+  $("headerMonthTotal").textContent = money(sum(state.records.filter((record) => recordMonth(record) === currentMonth())));
 }
 
 window.selectLessonTemplate = selectLessonTemplate;
