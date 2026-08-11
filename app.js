@@ -4,14 +4,14 @@ const COURSE_TYPES = {
   oneToTwo: "一对二",
   oneToThree: "一对三",
   oneToFour: "一对四",
-  classCourse: "班课"
+  classCourse: "班课(5人+)"
 };
 const TYPE_GROUPS = [
   ["oneToOne", "一对一"],
   ["oneToTwo", "一对二"],
   ["oneToThree", "一对三"],
   ["oneToFour", "一对四"],
-  ["classCourse", "班课"]
+  ["classCourse", "班课(5人+)"]
 ];
 const STATUS_LABELS = {
   present: "到课",
@@ -888,7 +888,6 @@ function renderSimpleLessonPickers() {
   $("simpleClassWrap").classList.toggle("hidden", !isClass);
   $("trialStudentsWrap").classList.toggle("hidden", !isClass);
   $("allPresentBtn").classList.toggle("hidden", !isClass);
-  $("simplePerStudentWrap").classList.toggle("hidden", $("simpleSettlementMode").value !== "perHead");
 
   const selectedClass = $("simpleClass").value;
   const classes = state.classes.filter((item) => item.grade === grade);
@@ -1009,14 +1008,11 @@ function calculateWage({ grade, courseType, selectedStudents, selectedClass, att
     if (activeTemplate?.fixedMode === "fixed" && activeTemplate.fixedPrice !== null && activeTemplate.fixedPrice !== undefined) {
       return { amount: activeTemplate.fixedPrice, source: `模板固定价：${activeTemplate.name}固定价格 ${activeTemplate.fixedPrice} 元`, warnings };
     }
-    const extra = selectedClass?.extraPerStudent ?? defaultExtra;
+    const extra = defaultExtra;
     const extraCount = Math.max(presentCount - 2, 0);
-    if (selectedClass && selectedClass.smallBasePrice !== null && selectedClass.smallBasePrice !== undefined) {
-      return { amount: selectedClass.smallBasePrice, source: `班级固定价：${selectedClass.name}固定价格 ${selectedClass.smallBasePrice} 元`, warnings };
-    }
     const base = standards[grade].classBase ?? standards[grade].oneToTwo;
     const amount = base + extraCount * extra;
-    return { amount, source: `默认价格：${grade}班课，到课 ${presentCount} 人，${base} + ${extraCount * extra} = ${amount} 元`, warnings };
+    return { amount, source: `聚能结算：${grade}班课，到课 ${presentCount} 人，${base} + ${extraCount * extra} = ${amount} 元`, warnings };
   }
   return { amount: 0, source: "未识别课程类型", warnings: ["未识别课程类型"] };
 }
@@ -1038,9 +1034,11 @@ function calculateLessonSettlementAmount({ wageAmount, courseType, selectedClass
 }
 
 function getLessonSettlementInput(data) {
+  const classCustomPrice = data.selectedClass?.settlementPerStudent;
+  const hasClassCustomPrice = classCustomPrice !== null && classCustomPrice !== undefined && classCustomPrice !== "";
   return {
-    settlementMode: data.selectedClass?.settlementMode === "perHead" ? "perHead" : $("simpleSettlementMode").value,
-    perStudentPrice: data.selectedClass?.settlementMode === "perHead"
+    settlementMode: hasClassCustomPrice ? "perHead" : $("simpleSettlementMode").value,
+    perStudentPrice: hasClassCustomPrice
       ? numberOrNull(data.selectedClass.settlementPerStudent)
       : numberOrNull($("simplePerStudentPrice").value)
   };
@@ -1589,14 +1587,13 @@ function saveClass(event) {
     grade: $("classGrade").value,
     institutionTag: normalizeTag($("classTag").value),
     students: editingClassStudents.filter((student) => student.name).map((student) => ({ ...student })),
-    smallBasePrice: numberOrNull($("classBasePrice").value),
-    extraPerStudent: numberOrNull($("classExtraPrice").value) ?? 10,
-    settlementMode: $("classSettlementMode").value,
+    smallBasePrice: null,
+    extraPerStudent: 10,
+    settlementMode: numberOrNull($("classSettlementPerStudent").value) === null ? "wage" : "perHead",
     settlementPerStudent: numberOrNull($("classSettlementPerStudent").value),
     note: $("classNote").value.trim()
   };
   if (!classItem.name) return alert("请填写班级名称。");
-  if (classItem.settlementMode === "perHead" && classItem.settlementPerStudent === null) return alert("按人头收费时，请填写每名学生收费。");
   const index = state.classes.findIndex((item) => item.id === id);
   if (index >= 0) state.classes[index] = classItem;
   else state.classes.push(classItem);
@@ -1609,9 +1606,6 @@ function resetClassForm(shouldRender = true) {
   $("className").value = "";
   $("classGrade").value = GRADES[0];
   $("classTag").value = "";
-  $("classBasePrice").value = "";
-  $("classExtraPrice").value = "10";
-  $("classSettlementMode").value = "wage";
   $("classSettlementPerStudent").value = "";
   $("classBulkStudents").value = "";
   $("classNote").value = "";
@@ -1623,17 +1617,15 @@ function renderClasses() {
   $("classList").innerHTML = state.classes.length ? state.classes.map((classItem) => {
     const active = (classItem.students || []).filter((student) => student.status !== "inactive");
     const inactive = (classItem.students || []).filter((student) => student.status === "inactive");
-    const price = classItem.smallBasePrice !== null ? `工资：班课固定价 ${classItem.smallBasePrice}，每增加 1 人加 ${classItem.extraPerStudent ?? 10}` : `工资：使用默认班课规则，每增加 1 人加 ${classItem.extraPerStudent ?? state.settings.defaultSmallExtra ?? 10}`;
-    const settlement = classItem.settlementMode === "perHead"
-      ? `结算：按到课人头，每人 ${classItem.settlementPerStudent ?? 0} 元`
-      : "结算：按本次工资金额";
+    const settlement = classItem.settlementPerStudent !== null && classItem.settlementPerStudent !== undefined
+      ? `自定义收费：每人 ${classItem.settlementPerStudent} 元`
+      : "聚能结算";
     return `
       <article class="item">
         <div class="item-head">
           <strong>${h(classItem.name)}</strong>
           <span class="muted">${h([classItem.grade, classItem.institutionTag].filter(Boolean).join("｜"))}</span>
         </div>
-        <p>${h(price)}</p>
         <p>${h(settlement)}</p>
         <p>在读：${h(active.map((student) => student.name).join("、") || "暂无")}</p>
         ${inactive.length ? `<p>停用：${h(inactive.map((student) => student.name).join("、"))}</p>` : ""}
@@ -1654,9 +1646,6 @@ function editClass(id) {
   $("className").value = classItem.name;
   $("classGrade").value = classItem.grade;
   $("classTag").value = classItem.institutionTag || "";
-  $("classBasePrice").value = classItem.smallBasePrice ?? "";
-  $("classExtraPrice").value = classItem.extraPerStudent ?? 10;
-  $("classSettlementMode").value = classItem.settlementMode || "wage";
   $("classSettlementPerStudent").value = classItem.settlementPerStudent ?? "";
   $("classNote").value = classItem.note || "";
   $("classBulkStudents").value = "";

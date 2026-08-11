@@ -146,7 +146,7 @@
               <select id="savedLessonTarget"></select>
             </label>
 
-            <div class="simple-lesson hidden">
+            <div class="simple-lesson">
               <div class="form-grid">
                 <label>课程类型
                   <select id="simpleCourseType">
@@ -154,7 +154,7 @@
                     <option value="oneToTwo">一对二</option>
                     <option value="oneToThree">一对三</option>
                     <option value="oneToFour">一对四</option>
-                    <option value="classCourse">班课</option>
+                    <option value="classCourse">班课(5人+)</option>
                   </select>
                 </label>
                 <label>年级
@@ -162,11 +162,11 @@
                 </label>
                 <label id="simpleSettlementModeWrap">结算方式
                   <select id="simpleSettlementMode">
-                    <option value="wage">按聚能/工资标准结算</option>
-                    <option value="perHead">按我自己的每人收费结算</option>
+                    <option value="wage">聚能结算</option>
+                    <option value="perHead">自定义收费</option>
                   </select>
                 </label>
-                <label id="simplePerStudentWrap">每人收费
+                <label id="simplePerStudentWrap">每人多少钱
                   <input id="simplePerStudentPrice" type="number" min="0" step="1" placeholder="例如：80">
                 </label>
               </div>
@@ -331,7 +331,7 @@
               <label>课程类型
                 <select id="templateType">
                   <option value="oneToOne">一对一</option>
-                  <option value="classCourse">班课</option>
+                  <option value="classCourse">班课(5人+)</option>
                 </select>
               </label>
               <label>年级
@@ -401,7 +401,7 @@
                 <option value="oneToTwo">一对二</option>
                 <option value="oneToThree">一对三</option>
                 <option value="oneToFour">一对四</option>
-                <option value="classCourse">班课</option>
+                <option value="classCourse">班课(5人+)</option>
               </select>
             </label>
           </div>
@@ -490,20 +490,8 @@
               <label>年级
                 <select id="classGrade"></select>
               </label>
-              <label>班课固定价格
-                <input id="classBasePrice" type="number" min="0" step="1" placeholder="可为空">
-              </label>
-              <label>工资每增加 1 人加价
-                <input id="classExtraPrice" type="number" min="0" step="1" value="10" placeholder="只影响老师本次工资">
-              </label>
-              <label>结算方式
-                <select id="classSettlementMode">
-                  <option value="wage">按本次工资结算</option>
-                  <option value="perHead">按到课人头收费</option>
-                </select>
-              </label>
-              <label>结算每名学生收费
-                <input id="classSettlementPerStudent" type="number" min="0" step="1" placeholder="按人头结算，例如：80">
+              <label>自定义每人收费
+                <input id="classSettlementPerStudent" type="number" min="0" step="1" placeholder="不填则按聚能结算">
               </label>
               <label>机构标签
                 <input id="classTag" type="text" placeholder="例如：机构A">
@@ -547,14 +535,14 @@
                   <th>一对二</th>
                   <th>一对三</th>
                   <th>一对四</th>
-                  <th>班课基础价</th>
+                  <th>班课(5人+)基础价</th>
                 </tr>
               </thead>
               <tbody id="standardsTable"></tbody>
             </table>
           </div>
           <div class="form-grid setting-row">
-            <label>默认班课工资每增加 1 人加价
+            <label>默认班课(5人+)每增加 1 人加价
               <input id="defaultSmallExtra" type="number" min="0" step="1">
             </label>
           </div>
