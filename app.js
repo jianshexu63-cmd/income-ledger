@@ -2184,7 +2184,7 @@ function renderPayrollTable(records) {
       <td>${h(row.typeText)}</td>
       <td><strong>${row.count}</strong></td>
       <td><strong>${money(row.amount)}</strong></td>
-      <td>${h(row.note || "")}</td>
+      <td>${h(row.timeList || "")}</td>
     </tr>
   `).join("") : `<tr><td colspan="8">暂无发工资数据。</td></tr>`;
 }
@@ -2244,11 +2244,13 @@ function payrollRowsFromRecords(records) {
   const groups = new Map();
   records.forEach((record) => {
     if (recordInstitutionTag(record) === "聚能") {
-      const key = ["聚能", "聚能", record.classId || record.className || record.courseName, record.courseType, record.grade].join("|");
+      const courseName = payrollCourseName(record);
+      const target = courseName ? `聚能（${courseName}）` : "聚能";
+      const key = ["聚能", target, record.classId || record.className || record.courseName, record.courseType, record.grade].join("|");
       addPayrollItem(groups, key, {
         owner: "聚能",
-        target: "聚能",
-        courseName: payrollCourseName(record),
+        target,
+        courseName,
         typeText: COURSE_TYPES[record.courseType] || "",
         date: displayLessonTime(record),
         amount: recordSettlementAmount(record),
@@ -2280,6 +2282,7 @@ function payrollRowsFromRecords(records) {
       count: group.count,
       amount: group.amount,
       note: Array.from(group.notes).join("；"),
+      timeList: dates.join("、"),
       dateText: dates.length === 1 ? dates[0] : `${dates[0]} 至 ${dates[dates.length - 1]}`
     };
   }).sort((a, b) => {
@@ -2364,7 +2367,7 @@ function exportCurrentMonthCsv() {
     if (filterCourseType && record.courseType !== filterCourseType) return false;
     return true;
   });
-  const headers = ["日期范围", "归属", "结算对象", "班级/个人", "一对几", "次数", "总金额", "备注"];
+  const headers = ["时间范围", "归属", "结算对象", "课程/班级", "一对几", "次数", "总金额", "上课时间"];
   const rows = payrollRowsFromRecords(records).map((row) => [
     row.dateText,
     row.owner,
@@ -2373,7 +2376,7 @@ function exportCurrentMonthCsv() {
     row.typeText,
     row.count,
     row.amount,
-    row.note
+    row.timeList
   ]);
   downloadBlob("\ufeff" + [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n"), `${filterDate || month}-发工资表.csv`, "text/csv;charset=utf-8");
 }
