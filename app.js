@@ -255,7 +255,6 @@ function scheduleCloudSync() {
 function init() {
   ["studentGrade", "studentGradeFilter", "classGrade", "templateGrade", "simpleGrade"].forEach((id) => fillGradeSelect($(id), id === "studentGradeFilter"));
   $("lessonDate").value = datetimeInputValue();
-  $("filterDate").value = "";
   $("filterMonth").value = currentMonth();
   $("todayLine").textContent = `${today()}，上完课，点模板，记工资。`;
 
@@ -301,11 +300,7 @@ function init() {
   $("resetClassBtn").addEventListener("click", resetClassForm);
   $("addClassStudentsBtn").addEventListener("click", addBulkClassStudents);
 
-  $("filterDate").addEventListener("input", renderStats);
-  $("filterMonth").addEventListener("input", () => {
-    $("filterDate").value = "";
-    renderStats();
-  });
+  $("filterMonth").addEventListener("change", renderStats);
   $("filterTag").addEventListener("input", renderStats);
   $("filterCourseType").addEventListener("input", renderStats);
   $("recordTable").addEventListener("click", handlePayrollRecordAction);
@@ -2209,13 +2204,12 @@ function addPendingGroup(groups, key, name, kind, mode, targetId, record, amount
 function renderStats() {
   const todayDate = today();
   const month = $("filterMonth").value || currentMonth();
-  const filterDate = $("filterDate").value;
   const filterTag = $("filterTag").value;
   const filterCourseType = $("filterCourseType").value;
   const todayRecords = state.records.filter((record) => recordDate(record) === todayDate);
   const monthRecords = state.records.filter((record) => recordMonth(record) === month);
   const displayRecords = state.records.filter((record) => {
-    if (filterDate ? recordDate(record) !== filterDate : recordMonth(record) !== month) return false;
+    if (recordMonth(record) !== month) return false;
     if (filterTag && recordInstitutionTag(record) !== filterTag) return false;
     if (filterCourseType && record.courseType !== filterCourseType) return false;
     return true;
@@ -2480,11 +2474,10 @@ function groupRecordsForStats(records) {
 
 function exportCurrentMonthCsv() {
   const month = $("filterMonth").value || currentMonth();
-  const filterDate = $("filterDate").value;
   const filterTag = $("filterTag").value;
   const filterCourseType = $("filterCourseType").value;
   const records = state.records.filter((record) => {
-    if (filterDate ? recordDate(record) !== filterDate : recordMonth(record) !== month) return false;
+    if (recordMonth(record) !== month) return false;
     if (filterTag && recordInstitutionTag(record) !== filterTag) return false;
     if (filterCourseType && record.courseType !== filterCourseType) return false;
     return true;
@@ -2500,7 +2493,7 @@ function exportCurrentMonthCsv() {
     row.amount,
     row.timeList
   ]);
-  downloadBlob("\ufeff" + [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n"), `${filterDate || month}-发工资表.csv`, "text/csv;charset=utf-8");
+  downloadBlob("\ufeff" + [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n"), `${month}-发工资表.csv`, "text/csv;charset=utf-8");
 }
 
 function exportJsonBackup() {
