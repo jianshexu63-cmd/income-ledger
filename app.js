@@ -41,6 +41,7 @@ let currentUser = null;
 let isCloudReady = false;
 let isBootstrapping = true;
 let syncTimer = null;
+let lastDeletedRecord = null;
 
 const $ = (id) => document.getElementById(id);
 const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -292,6 +293,8 @@ function init() {
   });
   $("filterTag").addEventListener("input", renderStats);
   $("filterCourseType").addEventListener("input", renderStats);
+  $("recordTable").addEventListener("click", handlePayrollRecordAction);
+  $("recordUndoNotice").addEventListener("click", undoLastDeletedRecord);
   $("exportCsvBtn").addEventListener("click", exportCurrentMonthCsv);
   $("exportJsonBtn").addEventListener("click", exportJsonBackup);
   $("importJsonBtn").addEventListener("click", () => $("importJsonFile").click());
@@ -1357,9 +1360,39 @@ function editLesson(id) {
 }
 
 function deleteLesson(id) {
-  if (!confirm("确定删除这条上课记录吗？")) return;
-  state.records = state.records.filter((item) => item.id !== id);
+  if (!confirm("确定撤销这条上课记录吗？撤销后它将从工资表和收入统计中移除。")) return;
+  const index = state.records.findIndex((item) => item.id === id);
+  if (index < 0) return;
+  lastDeletedRecord = { record: state.records[index], index };
+  state.records.splice(index, 1);
   saveState();
+  renderRecordUndoNotice();
+}
+
+function handlePayrollRecordAction(event) {
+  const button = event.target.closest("button[data-record-action]");
+  if (!button) return;
+  const { recordAction, recordId } = button.dataset;
+  if (recordAction === "edit") editLesson(recordId);
+  if (recordAction === "delete") deleteLesson(recordId);
+}
+
+function renderRecordUndoNotice() {
+  const notice = $("recordUndoNotice");
+  notice.classList.toggle("hidden", !lastDeletedRecord);
+  notice.innerHTML = lastDeletedRecord
+    ? `已撤销一条课时记录。<button type="button" class="ghost small">恢复</button>`
+    : "";
+}
+
+function undoLastDeletedRecord() {
+  if (!lastDeletedRecord) return;
+  const { record, index } = lastDeletedRecord;
+  state.records.splice(Math.min(index, state.records.length), 0, record);
+  state.records.sort((a, b) => (b.startAt || b.date).localeCompare(a.startAt || a.date));
+  lastDeletedRecord = null;
+  saveState();
+  renderRecordUndoNotice();
 }
 
 function toggleRecordConfirmed(id) {
@@ -2175,18 +2208,30 @@ function renderTodayRecords(records) {
 
 function renderPayrollTable(records) {
   const rows = payrollRowsFromRecords(records);
-  $("recordTable").innerHTML = rows.length ? rows.map((row) => `
-    <tr>
-      <td>${h(row.dateText)}</td>
-      <td>${h(row.owner)}</td>
-      <td>${h(row.target)}</td>
-      <td>${h(row.courseName)}</td>
-      <td>${h(row.typeText)}</td>
-      <td><strong>${row.count}</strong></td>
-      <td><strong>${money(row.amount)}</strong></td>
-      <td>${h(row.timeList || "")}</td>
-    </tr>
-  `).join("") : `<tr><td colspan="8">暂无发工资数据。</td></tr>`;
+  $("recordTable").innerHTML = rows.length ? rows.map((row) => {
+    const recordItems = row.recordIds.map((id) => records.find((record) => record.id === id)).filter(Boolean);
+    return `
+      <tr>
+        <td>${h(row.dateText)}</td>
+        <td>${h(row.owner)}</td>
+        <td>${h(row.target)}</td>
+        <td>${h(row.courseName)}</td>
+        <td>${h(row.typeText)}</td>
+        <td><strong>${row.count}</strong></td>
+        <td><strong>${money(row.amount)}</strong></td>
+        <td>${h(row.timeList || "")}</td>
+        <td><details class="record-actions">
+          <summary>管理 ${recordItems.length} 条</summary>
+          ${recordItems.map((record) => `
+            <div class="record-action-item">
+              <span>${h(displayLessonTime(record))}｜${h(record.courseName || record.className || COURSE_TYPES[record.courseType] || "课时")}｜${money(record.amount)}</span>
+              <button type="button" class="ghost small" data-record-action="edit" data-record-id="${h(record.id)}">修改</button>
+              <button type="button" class="ghost small" data-record-action="delete" data-record-id="${h(record.id)}">撤销</button>
+            </div>`).join("")}
+        </details></td>
+      </tr>`;
+  }).join("") : `<tr><td colspan="9">暂无发工资数据。</td></tr>`;
+  renderRecordUndoNotice();
 }
 
 function renderPayrollOverview(records) {
@@ -2254,6 +2299,7 @@ function payrollRowsFromRecords(records) {
         typeText: COURSE_TYPES[record.courseType] || "",
         date: displayLessonTime(record),
         amount: recordSettlementAmount(record),
+        recordId: record.id,
         note: payrollRecordNote(record)
       });
       return;
@@ -2268,6 +2314,7 @@ function payrollRowsFromRecords(records) {
         typeText: COURSE_TYPES[record.courseType] || "",
         date: displayLessonTime(record),
         amount: settlementRecordAmountForMode(record, "ownStudent", studentKey),
+        recordId: record.id,
         note: payrollRecordNote(record, student)
       });
     });
@@ -2281,6 +2328,7 @@ function payrollRowsFromRecords(records) {
       typeText: group.typeText,
       count: group.count,
       amount: group.amount,
+      recordIds: Array.from(group.recordIds),
       note: Array.from(group.notes).join("；"),
       timeList: dates.join("、"),
       dateText: dates.length === 1 ? dates[0] : `${dates[0]} 至 ${dates[dates.length - 1]}`
@@ -2300,6 +2348,7 @@ function addPayrollItem(groups, key, item) {
       typeText: item.typeText,
       count: 0,
       amount: 0,
+      recordIds: new Set(),
       dates: new Set(),
       notes: new Set()
     });
@@ -2307,6 +2356,7 @@ function addPayrollItem(groups, key, item) {
   const group = groups.get(key);
   group.count += 1;
   group.amount += Number(item.amount || 0);
+  if (item.recordId) group.recordIds.add(item.recordId);
   group.dates.add(item.date);
   if (item.note) group.notes.add(item.note);
 }

@@ -825,6 +825,37 @@ textarea:focus {
   overflow-x: auto;
 }
 
+.record-undo-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fbfa;
+}
+
+.record-actions summary {
+  cursor: pointer;
+  color: var(--primary);
+  white-space: nowrap;
+}
+
+.record-action-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 420px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.record-action-item span {
+  flex: 1;
+}
+
 .payroll-overview {
   display: grid;
   grid-template-columns: 1.1fr repeat(3, 1fr);
