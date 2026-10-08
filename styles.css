@@ -815,6 +815,44 @@ textarea:focus {
   border-left: 4px solid var(--primary);
 }
 
+.settlement-details {
+  margin-top: 8px;
+  color: var(--muted);
+}
+
+.settlement-details summary {
+  cursor: pointer;
+  color: var(--primary);
+}
+
+.settlement-record-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.settlement-record-line span {
+  min-width: 0;
+}
+
+.settlement-total {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.settlement-warning {
+  color: var(--danger);
+}
+
+.pending-settlement-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
 .filters {
   display: grid;
   grid-template-columns: repeat(2, minmax(180px, 280px));
@@ -854,6 +892,10 @@ textarea:focus {
 
 .record-action-item span {
   flex: 1;
+}
+
+.record-action-item small {
+  color: var(--muted);
 }
 
 .payroll-overview {

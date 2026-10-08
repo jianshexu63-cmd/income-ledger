@@ -187,10 +187,25 @@ function migrateState(data) {
     month: settlement.month || currentMonth(),
     settledAt: settlement.settledAt || today(),
     amount: Number(settlement.amount || 0),
-    recordIds: settlement.recordIds || [],
+    recordIds: Array.isArray(settlement.recordIds) ? settlement.recordIds : (settlement.allocations || []).map((item) => item.recordId).filter(Boolean),
+    allocations: Array.isArray(settlement.allocations) ? settlement.allocations : [],
     note: settlement.note || "",
     createdAt: settlement.createdAt || new Date().toISOString()
   }));
+  settlements.forEach((settlement) => {
+    const linkedRecordIds = records.filter((record) => record.settlementId === settlement.id || Object.values(record.studentSettlementIds || {}).includes(settlement.id)).map((record) => record.id);
+    settlement.recordIds = Array.from(new Set([...settlement.recordIds, ...linkedRecordIds]));
+    const allocatedRecordIds = new Set(settlement.allocations.map((item) => item.recordId));
+    settlement.allocations.push(...settlement.recordIds.filter((recordId) => !allocatedRecordIds.has(recordId)).map((recordId) => {
+      const record = records.find((item) => item.id === recordId);
+      if (!record) return { recordId, targetId: settlement.targetId, amount: 0 };
+      return {
+        recordId,
+        targetId: settlement.mode === "ownStudent" ? settlement.targetId : "",
+        amount: settlementRecordAmountForMode(record, settlement.mode, settlement.targetId)
+      };
+    }));
+  });
   const mainIncomes = (data.mainIncomes || data.salaryEntries || []).map((income) => ({
     id: income.id || uid(),
     month: income.month || currentMonth(),
@@ -309,6 +324,7 @@ function init() {
   });
   $("settlementTarget").addEventListener("input", renderSettlementPreview);
   $("settlementMonth").addEventListener("input", renderSettlementPreview);
+  $("pendingSettlementList").addEventListener("click", handlePendingSettlementClick);
   $("settlementDate").value = today();
   $("settlementMonth").value = currentMonth();
   $("refreshSettlementBtn").addEventListener("click", renderSettlementPreview);
@@ -1360,6 +1376,10 @@ function editLesson(id) {
 }
 
 function deleteLesson(id) {
+  const record = state.records.find((item) => item.id === id);
+  if (!record) return;
+  const linkedSettlements = state.settlements.filter((item) => (item.recordIds || []).includes(id) || (item.allocations || []).some((allocation) => allocation.recordId === id));
+  if (linkedSettlements.length) return alert(`这条课时已关联结算单：${linkedSettlements.map((item) => item.title || item.targetName).join("、")}。请先在结算单中撤销对应结算，再撤销课时，避免账目断链。`);
   if (!confirm("确定撤销这条上课记录吗？撤销后它将从工资表和收入统计中移除。")) return;
   const index = state.records.findIndex((item) => item.id === id);
   if (index < 0) return;
@@ -1806,7 +1826,7 @@ function deleteClass(id) {
 function renderDashboard() {
   const year = String(new Date().getFullYear());
   const mainYear = state.mainIncomes.filter((item) => item.month.startsWith(year));
-  const settlementsYear = state.settlements.filter((item) => item.settledAt.startsWith(year) || item.month.startsWith(year));
+  const settlementsYear = state.settlements.filter((item) => (item.settledAt || "").startsWith(year));
   const pendingYear = state.records.filter((record) => recordYear(record) === year && recordPendingSettlementAmount(record) > 0);
   const mainTotal = sumMainIncome(mainYear);
   const sideSettled = settlementsYear.reduce((total, item) => total + Number(item.amount || 0), 0);
@@ -1827,7 +1847,7 @@ function renderMonthlyIncomeList(year) {
   const rows = Array.from({ length: 12 }, (_, index) => {
     const month = `${year}-${String(index + 1).padStart(2, "0")}`;
     const main = sumMainIncome(state.mainIncomes.filter((item) => item.month === month));
-    const side = state.settlements.filter((item) => item.month === month || item.settledAt.startsWith(month))
+    const side = state.settlements.filter((item) => (item.settledAt || "").startsWith(month))
       .reduce((total, item) => total + Number(item.amount || 0), 0);
     const pending = sumPendingSettlement(state.records.filter((record) => recordMonth(record) === month));
     return { month, main, side, pending, total: main + side };
@@ -1865,12 +1885,28 @@ function renderIncomeSourceList(mainYear, settlementsYear) {
 
 function renderPendingSettlementList(records) {
   const groups = groupPendingRecords(records);
-  $("pendingSettlementList").innerHTML = groups.length ? groups.slice(0, 6).map((group) => `
+  $("pendingSettlementList").innerHTML = groups.length ? groups.map((group) => `
     <article class="compact-item">
       <strong>${h(group.name)} ${money(group.amount)}</strong>
       <p>${group.count} 次课｜${h(group.kind)}｜${h(group.dates.join("、"))}</p>
+      <div class="pending-settlement-actions">
+        ${Object.entries(group.monthBreakdown).sort(([a], [b]) => a.localeCompare(b)).map(([month, detail]) => `
+          <button type="button" class="ghost small" data-pending-mode="${h(group.mode)}" data-pending-target="${h(group.targetId)}" data-pending-month="${h(month)}">去结算 ${h(month)}｜${money(detail.amount)}</button>
+        `).join("")}
+      </div>
     </article>
   `).join("") : `<div class="empty">今年副业课时都已结算。</div>`;
+}
+
+function handlePendingSettlementClick(event) {
+  const button = event.target.closest("button[data-pending-mode]");
+  if (!button) return;
+  $("settlementMode").value = button.dataset.pendingMode;
+  $("settlementMonth").value = button.dataset.pendingMonth;
+  renderSettlementTargets();
+  $("settlementTarget").value = button.dataset.pendingTarget;
+  renderSettlementPreview();
+  $("settlementForm").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function renderSettlementPage() {
@@ -1895,11 +1931,11 @@ function renderSettlementTargets() {
 
 function settlementStudentOptions() {
   const map = new Map();
-  state.records.filter((record) => !record.settlementId).forEach((record) => {
+  state.records.forEach((record) => {
     if (recordInstitutionTag(record) === "聚能") return;
     normalizedAttendance(record).filter((item) => item.status === "present").forEach((item) => {
       const key = studentSettlementKey(item);
-      if (key && !record.studentSettlementIds?.[key] && !map.has(key)) {
+      if (key && recordPendingSettlementAmountForMode(record, "ownStudent", key) > 0 && !map.has(key)) {
         map.set(key, {
           id: key,
           name: `${item.name}${recordInstitutionTag(record) ? `｜${recordInstitutionTag(record)}` : ""}`
@@ -1917,9 +1953,9 @@ function settlementCandidateRecords() {
   if (!target) return [];
   return state.records.filter((record) => {
     if (recordMonth(record) !== month) return false;
-    if (mode === "juneng") return !record.settlementId && recordInstitutionTag(record) === target;
-    if (record.settlementId || recordInstitutionTag(record) === "聚能") return false;
-    return recordPresentStudents(record).some((item) => studentSettlementKey(item) === target && !record.studentSettlementIds?.[target]);
+    if (mode === "juneng") return recordPendingSettlementAmountForMode(record, mode, target) > 0 && recordInstitutionTag(record) === target;
+    if (recordInstitutionTag(record) === "聚能") return false;
+    return recordPendingSettlementAmountForMode(record, mode, target) > 0;
   });
 }
 
@@ -1936,7 +1972,7 @@ function renderSettlementPreview() {
     : "当前条件下没有未结算课。";
   $("settlementPreviewList").innerHTML = records.length ? records.map((record) => `
     <article class="compact-item">
-      <strong>${h(displayLessonTime(record))} ${h(record.courseName)} ${money(settlementRecordAmountForMode(record, mode, target))}</strong>
+      <strong>${h(displayLessonTime(record))} ${h(record.courseName)} 本次结算 ${money(recordPendingSettlementAmountForMode(record, mode, target))}</strong>
       <p>${h(COURSE_TYPES[record.courseType])}｜整节 ${money(recordSettlementAmount(record))}｜${h(recordSettlementSource(record))}</p>
     </article>
   `).join("") : `<div class="empty">没有可结算课时。</div>`;
@@ -1961,6 +1997,11 @@ function saveSettlement(event) {
     settledAt: $("settlementDate").value || today(),
     amount: settlementRecordsAmount(records, mode, targetId),
     recordIds: records.map((record) => record.id),
+    allocations: records.map((record) => ({
+      recordId: record.id,
+      targetId: mode === "ownStudent" ? targetId : "",
+      amount: recordPendingSettlementAmountForMode(record, mode, targetId)
+    })),
     note: $("settlementNote").value.trim(),
     createdAt: new Date().toISOString()
   };
@@ -1995,6 +2036,15 @@ function renderSettlementList() {
         <span class="pill">${money(item.amount)}</span>
       </div>
       <p>${h(item.settledAt)} 到账｜${h(settlementModeLabel(item.mode))}｜${item.recordIds.length} 次课</p>
+      <details class="settlement-details">
+        <summary>查看对应课时</summary>
+        ${(item.allocations || []).map((allocation) => {
+          const record = state.records.find((entry) => entry.id === allocation.recordId);
+          return `<div class="settlement-record-line"><span>${record ? `${h(displayLessonTime(record))}｜${h(record.courseName || record.className || "课时")}` : `课时记录已不存在（${h(allocation.recordId)}）`}</span><strong>${money(allocation.amount)}</strong></div>`;
+        }).join("") || `<p class="muted">旧结算单没有可追溯的课时明细。</p>`}
+        <div class="settlement-record-line settlement-total"><span>明细合计</span><strong>${money((item.allocations || []).reduce((total, allocation) => total + Number(allocation.amount || 0), 0))}</strong></div>
+        ${Math.abs((item.allocations || []).reduce((total, allocation) => total + Number(allocation.amount || 0), 0) - Number(item.amount || 0)) > 0.01 ? `<p class="settlement-warning">结算单金额与课时明细合计不一致，请核对。</p>` : ""}
+      </details>
       ${item.note ? `<p>${h(item.note)}</p>` : ""}
       <div class="item-actions">
         <button class="danger small" onclick="deleteSettlement('${item.id}')">撤销结算</button>
@@ -2011,6 +2061,7 @@ function deleteSettlement(id) {
   const settlement = state.settlements.find((item) => item.id === id);
   if (!settlement) return;
   if (!confirm("撤销后，这批课会重新变成未结算，确定继续吗？")) return;
+  const touchedRecords = [];
   state.records.forEach((record) => {
     let touched = false;
     if (record.settlementId === id) {
@@ -2025,9 +2076,12 @@ function deleteSettlement(id) {
         }
       });
     }
-    if (touched) record.confirmed = isRecordFullySettled(record);
+    if (touched) touchedRecords.push(record);
   });
   state.settlements = state.settlements.filter((item) => item.id !== id);
+  touchedRecords.forEach((record) => {
+    record.confirmed = isRecordFullySettled(record);
+  });
   saveState();
 }
 
@@ -2118,14 +2172,16 @@ function groupPendingRecords(records) {
   records.forEach((record) => {
     const tag = recordInstitutionTag(record);
     if (tag === "聚能") {
-      if (record.settlementId) return;
-      addPendingGroup(groups, `institution|${tag}`, tag, "聚能统一", record, recordSettlementAmount(record));
+      const pending = recordPendingSettlementAmount(record);
+      if (!pending) return;
+      addPendingGroup(groups, `institution|${tag}`, tag, "聚能统一", "juneng", tag, record, pending);
       return;
     }
     recordPresentStudents(record).forEach((student) => {
       const key = studentSettlementKey(student);
-      if (record.studentSettlementIds?.[key]) return;
-      addPendingGroup(groups, `student|${key}`, student.name || record.courseName, "学生单独", record, settlementRecordAmountForMode(record, "ownStudent", key));
+      const pending = recordPendingSettlementAmountForMode(record, "ownStudent", key);
+      if (!pending) return;
+      addPendingGroup(groups, `student|${key}`, student.name || record.courseName, "学生单独", "ownStudent", key, record, pending);
     });
   });
   return Array.from(groups.values()).map((group) => ({
@@ -2135,13 +2191,19 @@ function groupPendingRecords(records) {
   })).sort((a, b) => b.amount - a.amount);
 }
 
-function addPendingGroup(groups, key, name, kind, record, amount) {
-  if (!groups.has(key)) groups.set(key, { name, kind, count: 0, amount: 0, months: new Set(), dates: new Set() });
+function addPendingGroup(groups, key, name, kind, mode, targetId, record, amount) {
+  if (!groups.has(key)) groups.set(key, { name, kind, mode, targetId, count: 0, amount: 0, months: new Set(), dates: new Set(), monthBreakdown: {} });
   const group = groups.get(key);
   group.count += 1;
   group.amount += Number(amount || 0);
-  group.months.add(recordMonth(record));
-  group.dates.add(displayLessonTime(record));
+  const month = recordMonth(record);
+  const date = displayLessonTime(record);
+  group.months.add(month);
+  group.dates.add(date);
+  if (!group.monthBreakdown[month]) group.monthBreakdown[month] = { amount: 0, count: 0, dates: [] };
+  group.monthBreakdown[month].amount += Number(amount || 0);
+  group.monthBreakdown[month].count += 1;
+  group.monthBreakdown[month].dates.push(date);
 }
 
 function renderStats() {
@@ -2224,7 +2286,13 @@ function renderPayrollTable(records) {
           <summary>管理 ${recordItems.length} 条</summary>
           ${recordItems.map((record) => `
             <div class="record-action-item">
-              <span>${h(displayLessonTime(record))}｜${h(record.courseName || record.className || COURSE_TYPES[record.courseType] || "课时")}｜${money(record.amount)}</span>
+              ${(() => {
+                const links = settlementsForRecord(record, row.owner, row.targetId);
+                const settledAmount = links.reduce((total, link) => total + link.amount, 0);
+                const expectedAmount = row.owner === "聚能" ? recordSettlementAmount(record) : settlementRecordAmountForMode(record, "ownStudent", row.targetId);
+                const pendingAmount = Math.max(0, expectedAmount - settledAmount);
+                return `<span>${h(displayLessonTime(record))}｜${h(record.courseName || record.className || COURSE_TYPES[record.courseType] || "课时")}｜工资 ${money(record.amount)}<br><small>${settledAmount > 0 ? `已结 ${money(settledAmount)}（${links.map((link) => h(link.title || link.settledAt)).join("、")}）` : "未结算"}${pendingAmount > 0 ? `｜待结 ${money(pendingAmount)}` : ""}</small></span>`;
+              })()}
               <button type="button" class="ghost small" data-record-action="edit" data-record-id="${h(record.id)}">修改</button>
               <button type="button" class="ghost small" data-record-action="delete" data-record-id="${h(record.id)}">撤销</button>
             </div>`).join("")}
@@ -2295,6 +2363,7 @@ function payrollRowsFromRecords(records) {
       addPayrollItem(groups, key, {
         owner: "聚能",
         target,
+        targetId: recordInstitutionTag(record),
         courseName,
         typeText: COURSE_TYPES[record.courseType] || "",
         date: displayLessonTime(record),
@@ -2310,6 +2379,7 @@ function payrollRowsFromRecords(records) {
       addPayrollItem(groups, key, {
         owner: "自有",
         target: student.name || record.courseName,
+        targetId: studentKey,
         courseName: payrollCourseName(record),
         typeText: COURSE_TYPES[record.courseType] || "",
         date: displayLessonTime(record),
@@ -2324,6 +2394,7 @@ function payrollRowsFromRecords(records) {
     return {
       owner: group.owner,
       target: group.target,
+      targetId: group.targetId,
       courseName: group.courseName,
       typeText: group.typeText,
       count: group.count,
@@ -2344,6 +2415,7 @@ function addPayrollItem(groups, key, item) {
     groups.set(key, {
       owner: item.owner,
       target: item.target,
+      targetId: item.targetId,
       courseName: item.courseName,
       typeText: item.typeText,
       count: 0,
@@ -2581,7 +2653,7 @@ function settlementRecordAmountForMode(record, mode, targetId) {
 }
 
 function settlementRecordsAmount(records, mode, targetId) {
-  return records.reduce((total, record) => total + settlementRecordAmountForMode(record, mode, targetId), 0);
+  return records.reduce((total, record) => total + recordPendingSettlementAmountForMode(record, mode, targetId), 0);
 }
 
 function markRecordSettled(record, mode, targetId, settlementId) {
@@ -2595,19 +2667,38 @@ function markRecordSettled(record, mode, targetId, settlementId) {
 }
 
 function isRecordFullySettled(record) {
-  if (record.settlementId) return true;
-  if (recordInstitutionTag(record) === "聚能") return false;
-  const present = recordPresentStudents(record);
-  return present.length > 0 && present.every((student) => record.studentSettlementIds?.[studentSettlementKey(student)]);
+  return recordPendingSettlementAmount(record) <= 0;
 }
 
 function recordPendingSettlementAmount(record) {
-  if (record.settlementId) return 0;
-  if (recordInstitutionTag(record) === "聚能") return recordSettlementAmount(record);
+  if (recordInstitutionTag(record) === "聚能") return recordPendingSettlementAmountForMode(record, "juneng", recordInstitutionTag(record));
   return recordPresentStudents(record).reduce((total, student) => {
-    const key = studentSettlementKey(student);
-    return record.studentSettlementIds?.[key] ? total : total + settlementRecordAmountForMode(record, "ownStudent", key);
+    return total + recordPendingSettlementAmountForMode(record, "ownStudent", studentSettlementKey(student));
   }, 0);
+}
+
+function recordPendingSettlementAmountForMode(record, mode, targetId) {
+  const owner = mode === "juneng" ? "聚能" : "自有";
+  const expected = settlementRecordAmountForMode(record, mode, targetId);
+  const settled = settlementsForRecord(record, owner, targetId).reduce((total, item) => total + item.amount, 0);
+  return Math.max(0, expected - settled);
+}
+
+function settlementsForRecord(record, owner, targetId) {
+  return state.settlements.flatMap((settlement) => {
+    const allocation = (settlement.allocations || []).find((item) => item.recordId === record.id && (item.targetId || "") === (settlement.mode === "ownStudent" ? targetId : ""));
+    const listed = (settlement.recordIds || []).includes(record.id);
+    const linkedByLegacyMarker = record.settlementId === settlement.id || Object.values(record.studentSettlementIds || {}).includes(settlement.id);
+    if (settlement.mode === "ownStudent") {
+      if (owner !== "自有" || settlement.targetId !== targetId || (!allocation && !listed && !linkedByLegacyMarker)) return [];
+      return [{ ...settlement, amount: Number(allocation?.amount ?? settlementRecordAmountForMode(record, "ownStudent", targetId)) }];
+    }
+    if (!listed && !allocation && !linkedByLegacyMarker) return [];
+    if (owner === "聚能" && recordInstitutionTag(record) !== "聚能") return [];
+    if (owner === "自有" && recordInstitutionTag(record) === "聚能") return [];
+    const amount = Number(allocation?.amount ?? (owner === "聚能" ? recordSettlementAmount(record) : settlementRecordAmountForMode(record, "ownStudent", targetId)));
+    return [{ ...settlement, amount }];
+  });
 }
 
 function sumPendingSettlement(records) {
